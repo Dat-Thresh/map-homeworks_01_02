@@ -15,9 +15,10 @@ void print_cores() {
 //таблица для запоминания результатов
 class table {
 private:
-	std::string** ptr;
+	std::string** ptr;//указатель на таблицу результатов
 	int cols = 5;//столбцы
 	int rows = 6;//строки
+	std::vector<std::pair<int, int>> ranges;//хранит границы разделенных векторов
 
 	//определяет колонку таблицы
 	int what_coloumn(int a) {
@@ -58,10 +59,40 @@ private:
 		return row;
 
 	}
+
+	//заполняет вектор границами для распределения по потокам
+	void fill_ranges(int number_of_threads, int begin, int end) {
+		//граница для одного потока
+		int edge = end / number_of_threads;
+		int first_edge = edge;
+		//смещаем границы, пока не достигнем конца
+
+		//каждую вторую (четную) итерацию добавляем +1 к начальной границе, в другом случае к правой границе добавляем +1
+		//чтобы компенсировать потерю остатка при делении кол-ва элементов на количество потоков
+		for (int i = 0; i < number_of_threads; i++) {
+			ranges.push_back(std::make_pair(begin, edge));
+			//std::cout << i + 1 << " ядро. Берем от " << ranges[i].first << " до " << ranges[i].second << std::endl;
+			if (i % 2 == 0) {
+				begin++;
+			}
+			else {
+				edge++;
+			}
+			begin += first_edge;
+			//чтобы избежать превышения диапазона, на предпоследней итерации записываем в последнюю границу размер вектора
+			if (i == number_of_threads - 2) {
+				edge = end;
+			}
+			else
+			{
+				edge += first_edge;
+			}
+		}
+	}
 public:
 	//конструктор
 	table() {
-		ptr = new std::string * [rows];
+		ptr = new std::string* [rows];
 		for (int i = 0; i < rows; i++) {
 			ptr[i] = new std::string[cols];
 		}
@@ -90,6 +121,7 @@ public:
 		}
 	}
 
+private:
 	//запоминает результат в таблицу
 	void remember(std::string str, int a, int b) {
 		ptr[a][b] = str;
@@ -103,6 +135,13 @@ public:
 		}
 	}
 
+public:
+	void delete_table() {
+		for (int i = 0; i < rows; i++) {
+			delete[] ptr[i];
+		}
+		delete[] ptr;
+	}
 	//вычисляет время выполнения сложения массивов и запоолняет балицу
 	void calc_by_number_of_threads(std::vector<int>& a, std::vector<int>& b, int number_of_threads, int begin, int end) {
 		
@@ -120,20 +159,17 @@ public:
 		}
 		//если больше одного потока
 		else {
-			//граница для одного потока
-			int edge = end / number_of_threads;
-
+			
 			//вектор потоков
 			std::vector<std::thread> vec_thread;
+
+			//заполняем границы для разделения по потокам
+			fill_ranges(number_of_threads, begin, end);
+
 			//запускаем потоки и считаем суммы элеметов векторов в рамках границ, засекая время
 			auto start = std::chrono::steady_clock::now();
 			for (int i = 0; i < number_of_threads; i++) {
-				vec_thread.push_back(std::thread(summ_vec, std::ref(a), std::ref(b), std::ref(begin), std::ref(edge)));
-				//смещаем границы, пока не достигнем конца
-				if (edge < end) {
-					begin += edge;
-					edge += edge;
-				}
+				vec_thread.push_back(std::thread(&table::summ_vec, *this, std::ref(a), std::ref(b), std::ref(ranges[i].first), std::ref(ranges[i].second)));
 			}
 			//засекаем время конца
 			auto finish = std::chrono::steady_clock::now();
@@ -148,22 +184,11 @@ public:
 
 	}
 
-	~table() {
-		for (int i = 0; i < rows; i++) {
-			delete[] ptr[i];
-		}
-		delete[] ptr;
-	}
+	//~table() {
+	//	delete_table();
+	//}
 };
 
-//суммирует элементы указанного промежутка векторов
-//void summ_vec(std::vector<int>& a, std::vector<int>& b, int begin, int end) {
-//	using namespace std::chrono_literals;
-//	std::this_thread::sleep_for(100ms);	
-//	for (int i = begin; i < end; i++) {
-//		a[i] + b[i];
-//	}
-//}
 
 
 int main() {
@@ -188,24 +213,29 @@ int main() {
 	//печатаем ядра
 	std::thread th1(print_cores);
 	table T;
+
 	//высчитываем время сложения массивов в зависимости от используемых потоков (i = количеству потоков)
+	//1000
 	for (int i = 1; i < 17; i *= 2) {
 		T.calc_by_number_of_threads(A_1000, B_1000, i, 0, 1000);
+	}
+	//10 000
+	for (int i = 1; i < 17; i *= 2) {		
 		T.calc_by_number_of_threads(A_ten_s, B_ten_s, i, 0, 10000);
+	}
+	 //100 000
+	for (int i = 1; i < 17; i *= 2) {		
 		T.calc_by_number_of_threads(A_hundred_s, B_hundred_s, i, 0, 100000);
+	}
+	//1 000 000
+	for (int i = 1; i < 17; i *= 2) {
 		T.calc_by_number_of_threads(A_million, B_million, i, 0, 1000000);
 	}
-
-	
 	
 
 	T.print_table();
-	
-	/*std::thread th2(summ_vec, std::ref(A_1000), std::ref(B_1000), 0, 1000);
-	std::thread th3(summ_vec, std::ref(A_ten_s), std::ref(B_ten_s), 0, 10000);
+	T.delete_table();
 
-	th2.join();
-	th3.join();*/
 	th1.join();
 
 	return 0;
